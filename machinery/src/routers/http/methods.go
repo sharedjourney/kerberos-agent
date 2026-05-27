@@ -394,21 +394,20 @@ func DoGetDigitalInputs(c *gin.Context) {
 			},
 		}
 
-		// Query the credential-supplied device directly. The shared
-		// event cache is for the agent's configured camera; this
-		// endpoint may be probing a different one.
+		// Single-camera-per-agent deployment model: the credential-
+		// supplied device is virtually always the agent's configured
+		// camera, so prefer the shared event cache (live Value/
+		// Timestamp) and merge bare device-API tokens for any token
+		// the stream has not yet observed.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
 		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
 		if err == nil {
-			var inputs []onvif.ONVIFEvents
 			onvifInputs, _ := onvif.GetDigitalInputs(device)
+			var tokens []string
 			for _, input := range onvifInputs.DigitalInputs {
-				inputs = append(inputs, onvif.ONVIFEvents{
-					Key:  string(input.Token),
-					Type: "input",
-				})
+				tokens = append(tokens, string(input.Token))
 			}
-			c.JSON(200, gin.H{"data": inputs})
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP("input", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
@@ -451,21 +450,20 @@ func DoGetRelayOutputs(c *gin.Context) {
 			},
 		}
 
-		// Query the credential-supplied device directly. The shared
-		// event cache is for the agent's configured camera; this
-		// endpoint may be probing a different one.
+		// Single-camera-per-agent deployment model: the credential-
+		// supplied device is virtually always the agent's configured
+		// camera, so prefer the shared event cache (live Value/
+		// Timestamp) and merge bare device-API tokens for any token
+		// the stream has not yet observed.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
 		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
 		if err == nil {
-			var outputs []onvif.ONVIFEvents
 			onvifOutputs, _ := onvif.GetRelayOutputs(device)
+			var tokens []string
 			for _, output := range onvifOutputs.RelayOutputs {
-				outputs = append(outputs, onvif.ONVIFEvents{
-					Key:  string(output.Token),
-					Type: "output",
-				})
+				tokens = append(tokens, string(output.Token))
 			}
-			c.JSON(200, gin.H{"data": outputs})
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP("output", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
