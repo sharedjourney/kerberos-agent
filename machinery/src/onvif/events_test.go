@@ -137,6 +137,83 @@ func TestDispatchEvent_CtxCancelledAndHandleMotionClosed_DoesNotPanic(t *testing
 	})
 }
 
+// --- handleStreamEvent -----------------------------------------------
+
+func TestHandleStreamEvent_AppliesToCache(t *testing.T) {
+	SharedEventCache().Reset()
+	t.Cleanup(func() { SharedEventCache().Reset() })
+
+	cfg := makeConfig("true", "false", "cam-1") // motion off — only the cache path matters
+	comm := makeCommunication(1)
+	ev := stream.Event{
+		Kind:      stream.KindDigitalInput,
+		Operation: stream.PropertyInitialized,
+		State:     stream.StateActive,
+		Source:    map[string]string{"InputToken": "DI1"},
+	}
+
+	recovering := false
+	handleStreamEvent(context.Background(), ev, cfg, comm, "cam-1", &recovering)
+
+	snap := SharedEventCache().Snapshot()
+	if assert.Len(t, snap, 1) {
+		assert.Equal(t, "DI1-input", snap[0].Key)
+		assert.Equal(t, "true", snap[0].Value)
+	}
+}
+
+func TestHandleStreamEvent_ClearsRecoveringFlag(t *testing.T) {
+	SharedEventCache().Reset()
+	t.Cleanup(func() { SharedEventCache().Reset() })
+
+	cfg := makeConfig("true", "true", "cam-1")
+	comm := makeCommunication(1)
+	ev := stream.Event{Kind: stream.KindMotion, State: stream.StateActive}
+
+	recovering := true
+	handleStreamEvent(context.Background(), ev, cfg, comm, "cam-1", &recovering)
+
+	assert.False(t, recovering, "first successful event must clear recovering so the recovery log only fires once")
+}
+
+// --- runStreamOnce: lifecycle ---------------------------------------
+
+func TestRunStreamOnce_ResetsCacheBeforeConnect(t *testing.T) {
+	// Locks the connect-window fix: with stale tokens from a previous
+	// run in the cache, runStreamOnce must clear them before
+	// attempting to connect to the (potentially new) camera. Without
+	// this, the heartbeat could publish previous-camera state during
+	// the connect window.
+	resetCache(t)
+	SharedEventCache().Apply(stream.Event{
+		Kind:      stream.KindDigitalInput,
+		Operation: stream.PropertyInitialized,
+		State:     stream.StateActive,
+		Source:    map[string]string{"InputToken": "stale-token"},
+	})
+	assert.NotEmpty(t, SharedEventCache().Snapshot(), "precondition")
+
+	cfg := &models.Configuration{
+		Name: "cam-x",
+		Config: models.Config{
+			Capture: models.Capture{
+				IPCamera: models.IPCamera{
+					// Connection refused — fastest failure path.
+					ONVIFXAddr: "127.0.0.1:1",
+				},
+			},
+		},
+	}
+	comm := makeCommunication(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, retry := runStreamOnce(ctx, cfg, comm)
+
+	assert.True(t, retry, "bad connect must request retry")
+	assert.Empty(t, SharedEventCache().Snapshot(), "Reset must run before Connect")
+}
+
 // --- isONVIFMotionEnabled --------------------------------------------
 
 func TestIsONVIFMotionEnabled_CaseAndWhitespace(t *testing.T) {

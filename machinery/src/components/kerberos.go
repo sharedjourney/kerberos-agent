@@ -337,9 +337,8 @@ func RunAgent(configDirectory string, configuration *models.Configuration, commu
 	communication.HandleONVIF = make(chan models.OnvifAction, 10)
 	go onvif.HandleONVIFActions(configuration, communication)
 
-	// Handle ONVIF event stream — opt-in via Capture.ONVIFMotion="true".
-	// Stops when the agent's shared context is cancelled. The function
-	// is a no-op if ONVIFMotion is not enabled.
+	// Feeds the shared event cache (used by the heartbeat) and routes
+	// motion events into HandleMotion when ONVIFMotion is enabled.
 	go onvif.HandleONVIFEventStream(*communication.Context, configuration, communication)
 
 	communication.HandleAudio = make(chan models.AudioDataPartial, 10)

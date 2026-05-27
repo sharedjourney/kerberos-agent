@@ -394,53 +394,21 @@ func DoGetDigitalInputs(c *gin.Context) {
 			},
 		}
 
+		// Query the credential-supplied device directly. The shared
+		// event cache is for the agent's configured camera; this
+		// endpoint may be probing a different one.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
 		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
-
-		onvifInputs, _ := onvif.GetDigitalInputs(device)
 		if err == nil {
-			// Get the digital inputs and outputs from the device
-			inputOutputs, err := onvif.GetInputOutputs()
-			if err == nil {
-				if err == nil {
-					// Get the digital outputs from the device
-					var inputs []onvif.ONVIFEvents
-					for _, event := range inputOutputs {
-						if event.Type == "input" {
-							inputs = append(inputs, event)
-						}
-					}
-					// Iterate over inputs from onvif and compare
-
-					for _, input := range onvifInputs.DigitalInputs {
-						find := false
-						for _, event := range inputs {
-							key := string(input.Token)
-							if key == event.Key {
-								find = true
-							}
-						}
-						if !find {
-							key := string(input.Token)
-							inputs = append(inputs, onvif.ONVIFEvents{
-								Key:  key,
-								Type: "input",
-							})
-						}
-					}
-					c.JSON(200, gin.H{
-						"data": inputs,
-					})
-				} else {
-					c.JSON(400, gin.H{
-						"data": "Something went wrong: " + err.Error(),
-					})
-				}
-			} else {
-				c.JSON(400, gin.H{
-					"data": "Something went wrong: " + err.Error(),
+			var inputs []onvif.ONVIFEvents
+			onvifInputs, _ := onvif.GetDigitalInputs(device)
+			for _, input := range onvifInputs.DigitalInputs {
+				inputs = append(inputs, onvif.ONVIFEvents{
+					Key:  string(input.Token),
+					Type: "input",
 				})
 			}
+			c.JSON(200, gin.H{"data": inputs})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
@@ -483,33 +451,21 @@ func DoGetRelayOutputs(c *gin.Context) {
 			},
 		}
 
+		// Query the credential-supplied device directly. The shared
+		// event cache is for the agent's configured camera; this
+		// endpoint may be probing a different one.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
-		_, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
+		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
 		if err == nil {
-			// Get the digital inputs and outputs from the device
-			inputOutputs, err := onvif.GetInputOutputs()
-			if err == nil {
-				if err == nil {
-					// Get the digital outputs from the device
-					var outputs []onvif.ONVIFEvents
-					for _, event := range inputOutputs {
-						if event.Type == "output" {
-							outputs = append(outputs, event)
-						}
-					}
-					c.JSON(200, gin.H{
-						"data": outputs,
-					})
-				} else {
-					c.JSON(400, gin.H{
-						"data": "Something went wrong: " + err.Error(),
-					})
-				}
-			} else {
-				c.JSON(400, gin.H{
-					"data": "Something went wrong: " + err.Error(),
+			var outputs []onvif.ONVIFEvents
+			onvifOutputs, _ := onvif.GetRelayOutputs(device)
+			for _, output := range onvifOutputs.RelayOutputs {
+				outputs = append(outputs, onvif.ONVIFEvents{
+					Key:  string(output.Token),
+					Type: "output",
 				})
 			}
+			c.JSON(200, gin.H{"data": outputs})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
