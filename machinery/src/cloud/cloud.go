@@ -30,7 +30,6 @@ import (
 	"github.com/kerberos-io/agent/machinery/src/packets"
 	"github.com/kerberos-io/agent/machinery/src/utils"
 	"github.com/kerberos-io/agent/machinery/src/webrtc"
-	goonvif "github.com/kerberos-io/onvif"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -286,336 +285,6 @@ func heartbeatFailureLogFields(response *http.Response, responseBody string, res
 	return fields
 }
 
-var (
-	heartbeatConnectToONVIFDevice           = onvif.ConnectToOnvifDevice
-	heartbeatCreatePullPointSubscription    = onvif.CreatePullPointSubscription
-	heartbeatGetDigitalInputs               = onvif.GetDigitalInputs
-	heartbeatGetEventMessages               = onvif.GetEventMessages
-	heartbeatGetPresetsFromDevice           = onvif.GetPresetsFromDevice
-	heartbeatGetPTZConfigurationsFromDevice = onvif.GetPTZConfigurationsFromDevice
-	heartbeatGetPTZFunctionsFromDevice      = onvif.GetPTZFunctionsFromDevice
-	heartbeatGetRelayOutputs                = onvif.GetRelayOutputs
-	heartbeatUnsubscribePullPoint           = onvif.UnsubscribePullPoint
-)
-
-type heartbeatONVIFPayload struct {
-	enabled     string
-	zoom        string
-	panTilt     string
-	presets     string
-	presetsList []byte
-	eventsList  []byte
-}
-
-func defaultHeartbeatONVIFPayload() heartbeatONVIFPayload {
-	return heartbeatONVIFPayload{
-		enabled:     "false",
-		zoom:        "false",
-		panTilt:     "false",
-		presets:     "false",
-		presetsList: []byte("[]"),
-		eventsList:  []byte("[]"),
-	}
-}
-
-type heartbeatONVIFState struct {
-	cameraConfiguration models.IPCamera
-	cameraKey           string
-	device              *goonvif.Device
-	loopPullPoint       string
-	staticLoaded        bool
-	staticPayload       heartbeatONVIFPayload
-}
-
-func newHeartbeatONVIFState() *heartbeatONVIFState {
-	state := &heartbeatONVIFState{}
-	state.reset(models.IPCamera{})
-	return state
-}
-
-func heartbeatONVIFCameraKey(camera models.IPCamera) string {
-	return strings.Join([]string{
-		camera.ONVIFXAddr,
-		camera.ONVIFUsername,
-		camera.ONVIFPassword,
-		strconv.Itoa(camera.ONVIFChannel),
-	}, "\x00")
-}
-
-func (state *heartbeatONVIFState) reset(camera models.IPCamera) {
-	state.cameraConfiguration = camera
-	state.cameraKey = heartbeatONVIFCameraKey(camera)
-	state.device = nil
-	state.loopPullPoint = ""
-	state.staticLoaded = false
-	state.staticPayload = defaultHeartbeatONVIFPayload()
-}
-
-func (state *heartbeatONVIFState) releaseLoopPullPoint() {
-	if state.loopPullPoint != "" && state.device != nil {
-		_ = heartbeatUnsubscribePullPoint(state.device, state.loopPullPoint)
-	}
-	state.loopPullPoint = ""
-}
-
-func (state *heartbeatONVIFState) prepare(camera models.IPCamera) {
-	cameraKey := heartbeatONVIFCameraKey(camera)
-	if state.cameraKey != cameraKey {
-		state.releaseLoopPullPoint()
-		state.reset(camera)
-		return
-	}
-	state.cameraConfiguration = camera
-	if camera.ONVIFXAddr == "" {
-		state.releaseLoopPullPoint()
-		state.reset(camera)
-	}
-}
-
-func (state *heartbeatONVIFState) invalidateCachedConnection() {
-	state.releaseLoopPullPoint()
-	state.device = nil
-	state.staticLoaded = false
-	state.staticPayload = defaultHeartbeatONVIFPayload()
-}
-
-func (state *heartbeatONVIFState) markDisconnected() heartbeatONVIFPayload {
-	state.invalidateCachedConnection()
-	return defaultHeartbeatONVIFPayload()
-}
-
-func (state *heartbeatONVIFState) staticSnapshot() heartbeatONVIFPayload {
-	payload := state.staticPayload
-	if len(payload.presetsList) == 0 {
-		payload.presetsList = []byte("[]")
-	}
-	payload.eventsList = []byte("[]")
-	return payload
-}
-
-func marshalHeartbeatONVIFEvents(events []onvif.ONVIFEvents) []byte {
-	eventsList, err := json.Marshal(events)
-	if err != nil {
-		log.Error("cloud.HandleHeartBeat(): error while marshalling events: " + err.Error())
-		return []byte("[]")
-	}
-	return eventsList
-}
-
-func (state *heartbeatONVIFState) connect(camera models.IPCamera) (*goonvif.Device, error) {
-	if state.device != nil {
-		return state.device, nil
-	}
-
-	device, _, err := heartbeatConnectToONVIFDevice(&camera)
-	if err != nil {
-		log.Error("cloud.HandleHeartBeat(): error while connecting to ONVIF device: " + err.Error())
-		state.invalidateCachedConnection()
-		return nil, err
-	}
-
-	state.device = device
-	return device, nil
-}
-
-func (state *heartbeatONVIFState) refreshStaticPayload(device *goonvif.Device) heartbeatONVIFPayload {
-	payload := defaultHeartbeatONVIFPayload()
-	payload.enabled = "true"
-	staticComplete := true
-
-	configurations, err := heartbeatGetPTZConfigurationsFromDevice(device)
-	if err == nil {
-		_, canZoom, canPanTilt := heartbeatGetPTZFunctionsFromDevice(configurations)
-		if canZoom {
-			payload.zoom = "true"
-		}
-		if canPanTilt {
-			payload.panTilt = "true"
-		}
-
-		presets, err := heartbeatGetPresetsFromDevice(device, state.cameraConfiguration.ONVIFChannel)
-		if err == nil && len(presets) > 0 {
-			payload.presets = "true"
-			presetsList, marshalErr := json.Marshal(presets)
-			if marshalErr != nil {
-				log.Error("cloud.HandleHeartBeat(): error while marshalling presets: " + marshalErr.Error())
-				staticComplete = false
-			} else {
-				payload.presetsList = presetsList
-			}
-		} else {
-			if err != nil {
-				log.Debug("cloud.HandleHeartBeat(): error while getting presets: " + err.Error())
-				staticComplete = false
-			} else {
-				log.Debug("cloud.HandleHeartBeat(): no presets found.")
-			}
-		}
-	} else {
-		log.Debug("cloud.HandleHeartBeat(): error while getting PTZ configurations: " + err.Error())
-		staticComplete = false
-	}
-
-	state.staticPayload = payload
-	state.staticLoaded = staticComplete
-	return payload
-}
-
-func (state *heartbeatONVIFState) createLoopPullPoint(device *goonvif.Device) error {
-	pullPointAddress, err := heartbeatCreatePullPointSubscription(device)
-	if err != nil {
-		log.Error("cloud.HandleHeartBeat(): error while creating pull point subscription: " + err.Error())
-		return err
-	}
-	if state.loopPullPoint != "" && state.loopPullPoint != pullPointAddress {
-		state.releaseLoopPullPoint()
-	}
-	state.loopPullPoint = pullPointAddress
-	return nil
-}
-
-func (state *heartbeatONVIFState) fetchInitialStateEvents(device *goonvif.Device) ([]byte, bool, bool, error) {
-	pullPointAddressInitialState, err := heartbeatCreatePullPointSubscription(device)
-	if err != nil {
-		log.Error("cloud.HandleHeartBeat(): error while creating pull point subscription: " + err.Error())
-		return []byte("[]"), false, false, err
-	}
-	if pullPointAddressInitialState == "" {
-		return []byte("[]"), false, false, nil
-	}
-
-	log.Debug("cloud.HandleHeartBeat(): Fetching events from pullPointAddressInitialState")
-	events, err := heartbeatGetEventMessages(device, pullPointAddressInitialState)
-	log.Debug("cloud.HandleHeartBeat(): Completed fetching events from pullPointAddressInitialState")
-	if err != nil {
-		log.Error("cloud.HandleHeartBeat(): error while getting events: " + err.Error())
-		_ = heartbeatUnsubscribePullPoint(device, pullPointAddressInitialState)
-		return []byte("[]"), true, false, err
-	}
-
-	eventsList := []byte("[]")
-	if len(events) > 0 {
-		eventsList = marshalHeartbeatONVIFEvents(events)
-	} else {
-		log.Debug("cloud.HandleHeartBeat(): no events found.")
-	}
-
-	_ = heartbeatUnsubscribePullPoint(device, pullPointAddressInitialState)
-	return eventsList, true, true, nil
-}
-
-func (state *heartbeatONVIFState) fallbackEvents(device *goonvif.Device) []byte {
-	var events []onvif.ONVIFEvents
-
-	outputs, err := heartbeatGetRelayOutputs(device)
-	if err != nil {
-		log.Debug("cloud.HandleHeartBeat(): error while getting relay outputs: " + err.Error())
-	} else {
-		for _, output := range outputs.RelayOutputs {
-			events = append(events, onvif.ONVIFEvents{
-				Key:       string(output.Token),
-				Value:     "false",
-				Type:      "output",
-				Timestamp: time.Now().Unix(),
-			})
-		}
-	}
-
-	inputs, err := heartbeatGetDigitalInputs(device)
-	if err != nil {
-		log.Debug("cloud.HandleHeartBeat(): error while getting digital inputs: " + err.Error())
-	} else {
-		for _, input := range inputs.DigitalInputs {
-			events = append(events, onvif.ONVIFEvents{
-				Key:       string(input.Token),
-				Value:     "false",
-				Type:      "input",
-				Timestamp: time.Now().Unix(),
-			})
-		}
-	}
-
-	return marshalHeartbeatONVIFEvents(events)
-}
-
-func (state *heartbeatONVIFState) fetchEvents(device *goonvif.Device) ([]byte, bool) {
-	onvifEventsList, initialStateSubscriptionCreated, _, _ := state.fetchInitialStateEvents(device)
-	operationFailed := false
-
-	if state.loopPullPoint != "" {
-		log.Debug("cloud.HandleHeartBeat(): Fetching events from pullPointAddressLoopState")
-		events, err := heartbeatGetEventMessages(device, state.loopPullPoint)
-		log.Debug("cloud.HandleHeartBeat(): Completed fetching events from pullPointAddressLoopState")
-		if err == nil && len(events) > 0 {
-			onvifEventsList = marshalHeartbeatONVIFEvents(events)
-		} else if err != nil {
-			log.Error("cloud.HandleHeartBeat(): error while getting events: " + err.Error())
-			operationFailed = true
-		} else {
-			log.Debug("cloud.HandleHeartBeat(): no events found.")
-		}
-	} else {
-		log.Debug("cloud.HandleHeartBeat(): no pull point address found.")
-		if err := state.createLoopPullPoint(device); err != nil {
-			operationFailed = true
-		}
-	}
-
-	// Fall back to querying the relay outputs and digital inputs directly when
-	// no subscription could be created, and also when the subscriptions
-	// produced no I/O events: some devices accept the subscription but reject
-	// the pulls, or never publish the initial I/O state.
-	noSubscription := !initialStateSubscriptionCreated && state.loopPullPoint == ""
-	if noSubscription || heartbeatEventsListEmpty(onvifEventsList) {
-		return state.fallbackEvents(device), operationFailed
-	}
-
-	return onvifEventsList, operationFailed
-}
-
-func heartbeatEventsListEmpty(eventsList []byte) bool {
-	trimmed := strings.TrimSpace(string(eventsList))
-	return trimmed == "" || trimmed == "[]" || trimmed == "null"
-}
-
-func getHeartbeatONVIFPayload(camera models.IPCamera, state *heartbeatONVIFState) heartbeatONVIFPayload {
-	if state == nil {
-		state = newHeartbeatONVIFState()
-	}
-
-	state.prepare(camera)
-
-	if camera.ONVIFXAddr == "" {
-		return defaultHeartbeatONVIFPayload()
-	}
-
-	device, err := state.connect(camera)
-	if err != nil {
-		return state.markDisconnected()
-	}
-
-	var payload heartbeatONVIFPayload
-	if !state.staticLoaded {
-		payload = state.refreshStaticPayload(device)
-	} else {
-		payload = state.staticSnapshot()
-	}
-
-	eventsList, operationFailed := state.fetchEvents(device)
-	payload.eventsList = eventsList
-	if operationFailed {
-		state.invalidateCachedConnection()
-	}
-	return payload
-}
-
-func (state *heartbeatONVIFState) unsubscribeLoopPullPoint() {
-	if state == nil || state.loopPullPoint == "" || state.cameraConfiguration.ONVIFXAddr == "" {
-		return
-	}
-	state.releaseLoopPullPoint()
-}
-
 func HandleHeartBeat(configuration *models.Configuration, communication *models.Communication, uptimeStart time.Time) {
 	log.Debug("cloud.HandleHeartBeat(): started")
 
@@ -636,7 +305,6 @@ func HandleHeartBeat(configuration *models.Configuration, communication *models.
 	}
 
 	kerberosAgentVersion := utils.VERSION
-	onvifState := newHeartbeatONVIFState()
 
 loop:
 	for {
@@ -652,16 +320,50 @@ loop:
 		onvifPresetsList := []byte("[]")
 		onvifEventsList := []byte("[]")
 		if config.Capture.IPCamera.ONVIFXAddr != "" {
-			payload := getHeartbeatONVIFPayload(config.Capture.IPCamera, onvifState)
-			onvifEnabled = payload.enabled
-			onvifZoom = payload.zoom
-			onvifPanTilt = payload.panTilt
-			onvifPresets = payload.presets
-			onvifPresetsList = payload.presetsList
-			onvifEventsList = payload.eventsList
+			cameraConfiguration := configuration.Config.Capture.IPCamera
+			device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
+			if err == nil {
+				// We will try to retrieve the PTZ configurations from the device.
+				onvifEnabled = "true"
+				configurations, err := onvif.GetPTZConfigurationsFromDevice(device)
+				if err == nil {
+					_, canZoom, canPanTilt := onvif.GetPTZFunctionsFromDevice(configurations)
+					if canZoom {
+						onvifZoom = "true"
+					}
+					if canPanTilt {
+						onvifPanTilt = "true"
+					}
+					// Try to read out presets
+					presets, err := onvif.GetPresetsFromDevice(device, cameraConfiguration.ONVIFChannel)
+					if err == nil && len(presets) > 0 {
+						onvifPresets = "true"
+						onvifPresetsList, err = json.Marshal(presets)
+						if err != nil {
+							log.Error("cloud.HandleHeartBeat(): error while marshalling presets: " + err.Error())
+							onvifPresetsList = []byte("[]")
+						}
+					} else {
+						if err != nil {
+							log.Debug("cloud.HandleHeartBeat(): error while getting presets: " + err.Error())
+						} else {
+							log.Debug("cloud.HandleHeartBeat(): no presets found.")
+						}
+						onvifPresetsList = []byte("[]")
+					}
+				} else {
+					log.Debug("cloud.HandleHeartBeat(): error while getting PTZ configurations: " + err.Error())
+					onvifPresetsList = []byte("[]")
+				}
+
+				onvifEventsList = onvif.AssembleHeartbeatEvents(device)
+			} else {
+				log.Error("cloud.HandleHeartBeat(): error while connecting to ONVIF device: " + err.Error())
+				onvifPresetsList = []byte("[]")
+				onvifEventsList = []byte("[]")
+			}
 		} else {
 			log.Debug("cloud.HandleHeartBeat(): ONVIF is not enabled.")
-			onvifState.prepare(models.IPCamera{})
 		}
 
 		// We'll capture some more metrics, and send it to Hub, if not in offline mode ofcourse ;) ;)
@@ -1025,8 +727,6 @@ loop:
 		case <-time.After(10 * time.Second):
 		}
 	}
-
-	onvifState.unsubscribeLoopPullPoint()
 
 	log.Debug("cloud.HandleHeartBeat(): finished")
 }

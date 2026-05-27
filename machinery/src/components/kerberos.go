@@ -573,9 +573,8 @@ func RunAgent(parent context.Context, configDirectory string, configuration *mod
 		return nil
 	})
 
-	// Handle ONVIF event stream — opt-in via Capture.ONVIFMotion="true".
-	// Stops when the agent's shared context is cancelled. The function
-	// is a no-op if ONVIFMotion is not enabled.
+	// Feeds the shared event cache (used by the heartbeat) and routes
+	// motion events into HandleMotion when ONVIFMotion is enabled.
 	registerTask("onvif-events", lifecycle.TaskPolicy{}, func(taskContext context.Context) error {
 		onvif.HandleONVIFEventStream(taskContext, configuration, communication)
 		return nil
