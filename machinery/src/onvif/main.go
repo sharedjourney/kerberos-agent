@@ -190,20 +190,22 @@ func HandleONVIFActions(configuration *models.Configuration, communication *mode
 func ConnectToOnvifDevice(cameraConfiguration *models.IPCamera) (*onvif.Device, device.GetCapabilitiesResponse, error) {
 	log.Log.Debug("onvif.ConnectToOnvifDevice(): started")
 	dev, err := onvif.NewDevice(onvif.DeviceParams{
-		Xaddr:    cameraConfiguration.ONVIFXAddr,
-		Username: cameraConfiguration.ONVIFUsername,
-		Password: cameraConfiguration.ONVIFPassword,
-		AuthMode: "both",
+		Xaddr:      cameraConfiguration.ONVIFXAddr,
+		Username:   cameraConfiguration.ONVIFUsername,
+		Password:   cameraConfiguration.ONVIFPassword,
+		AuthMode:   "both",
+		HttpClient: onvifHTTPClient(),
 	})
 
 	var capabilities device.GetCapabilitiesResponse
 	if err != nil {
 		// Try again with other authentication mode
 		dev, err = onvif.NewDevice(onvif.DeviceParams{
-			Xaddr:    cameraConfiguration.ONVIFXAddr,
-			Username: cameraConfiguration.ONVIFUsername,
-			Password: cameraConfiguration.ONVIFPassword,
-			AuthMode: "digest",
+			Xaddr:      cameraConfiguration.ONVIFXAddr,
+			Username:   cameraConfiguration.ONVIFUsername,
+			Password:   cameraConfiguration.ONVIFPassword,
+			AuthMode:   "digest",
+			HttpClient: onvifHTTPClient(),
 		})
 		if err != nil {
 			log.Log.Debug("onvif.ConnectToOnvifDevice(): " + err.Error())

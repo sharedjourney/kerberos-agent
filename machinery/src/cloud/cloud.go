@@ -219,6 +219,40 @@ func GetSystemInfo() (models.System, error) {
 	return system, nil
 }
 
+const (
+	// heartbeatHTTPTimeout bounds the POST to Hub/Vault so a stalled
+	// connection delays one beat instead of wedging the loop.
+	heartbeatHTTPTimeout = 30 * time.Second
+	// onvifMetadataInterval is how often the background poller refreshes
+	// ONVIF capabilities. They change rarely, so this is deliberately
+	// slow — it only needs to stay ahead of operator-visible drift, not
+	// the 10s heartbeat cadence.
+	onvifMetadataInterval = 60 * time.Second
+)
+
+// pollONVIFMetadata refreshes the shared ONVIF metadata cache on its own
+// cadence so HandleHeartBeat never performs blocking camera I/O on the
+// send path. It primes the cache once immediately, then ticks until
+// stopped. The blocking work is bounded by the ONVIF client timeout.
+func pollONVIFMetadata(configuration *models.Configuration, stop <-chan struct{}) {
+	refresh := func() {
+		camera := configuration.Config.Capture.IPCamera
+		onvif.SharedMetadataCache().Store(onvif.GatherHeartbeatMetadata(&camera))
+	}
+	refresh()
+
+	ticker := time.NewTicker(onvifMetadataInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
 func HandleHeartBeat(configuration *models.Configuration, communication *models.Communication, uptimeStart time.Time) {
 	log.Log.Debug("cloud.HandleHeartBeat(): started")
 
@@ -227,10 +261,17 @@ func HandleHeartBeat(configuration *models.Configuration, communication *models.
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
-		client = &http.Client{Transport: tr}
+		client = &http.Client{Transport: tr, Timeout: heartbeatHTTPTimeout}
 	} else {
-		client = &http.Client{}
+		client = &http.Client{Timeout: heartbeatHTTPTimeout}
 	}
+
+	// Refresh ONVIF metadata off the heartbeat send path so a wedged
+	// camera can never stall the heartbeat. Stops when this function
+	// returns (reconfiguration / shutdown).
+	stopMetadata := make(chan struct{})
+	defer close(stopMetadata)
+	go pollONVIFMetadata(configuration, stopMetadata)
 
 	kerberosAgentVersion := utils.VERSION
 
@@ -239,62 +280,19 @@ loop:
 		// Configuration migh have changed, so we will reload it.
 		config := configuration.Config
 
-		// We'll check ONVIF capabilitites anyhow.. Verify if we have PTZ, presets and inputs/outputs.
-		// For the inputs we will keep track of a the inputs and outputs state.
-		onvifEnabled := "false"
-		onvifZoom := "false"
-		onvifPanTilt := "false"
-		onvifPresets := "false"
-		var onvifPresetsList []byte
-		var onvifEventsList []byte
-		if config.Capture.IPCamera.ONVIFXAddr != "" {
-			cameraConfiguration := configuration.Config.Capture.IPCamera
-			device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
-			if err == nil {
-				// We will try to retrieve the PTZ configurations from the device.
-				onvifEnabled = "true"
-				configurations, err := onvif.GetPTZConfigurationsFromDevice(device)
-				if err == nil {
-					_, canZoom, canPanTilt := onvif.GetPTZFunctionsFromDevice(configurations)
-					if canZoom {
-						onvifZoom = "true"
-					}
-					if canPanTilt {
-						onvifPanTilt = "true"
-					}
-					// Try to read out presets
-					presets, err := onvif.GetPresetsFromDevice(device)
-					if err == nil && len(presets) > 0 {
-						onvifPresets = "true"
-						onvifPresetsList, err = json.Marshal(presets)
-						if err != nil {
-							log.Log.Error("cloud.HandleHeartBeat(): error while marshalling presets: " + err.Error())
-							onvifPresetsList = []byte("[]")
-						}
-					} else {
-						if err != nil {
-							log.Log.Debug("cloud.HandleHeartBeat(): error while getting presets: " + err.Error())
-						} else {
-							log.Log.Debug("cloud.HandleHeartBeat(): no presets found.")
-						}
-						onvifPresetsList = []byte("[]")
-					}
-				} else {
-					log.Log.Debug("cloud.HandleHeartBeat(): error while getting PTZ configurations: " + err.Error())
-					onvifPresetsList = []byte("[]")
-				}
-
-				onvifEventsList = onvif.AssembleHeartbeatEvents(device)
-			} else {
-				log.Log.Error("cloud.HandleHeartBeat(): error while connecting to ONVIF device: " + err.Error())
-				onvifPresetsList = []byte("[]")
-				onvifEventsList = []byte("[]")
-			}
-		} else {
-			log.Log.Debug("cloud.HandleHeartBeat(): ONVIF is not enabled.")
-			onvifPresetsList = []byte("[]")
-			onvifEventsList = []byte("[]")
-		}
+		// ONVIF capabilities (PTZ/presets/digital-I/O) are refreshed by a
+		// background poller into a shared cache; the heartbeat reads that
+		// snapshot instead of talking to the camera, so a slow ONVIF call
+		// can never delay a heartbeat. Live digital-I/O state still comes
+		// from the event-stream cache, with the poller's enumerated token
+		// list as a non-blocking fallback.
+		onvifMetadata := onvif.SharedMetadataCache().Snapshot()
+		onvifEnabled := onvifMetadata.Enabled
+		onvifZoom := onvifMetadata.Zoom
+		onvifPanTilt := onvifMetadata.PanTilt
+		onvifPresets := onvifMetadata.Presets
+		onvifPresetsList := onvifMetadata.PresetsList
+		onvifEventsList := onvif.AssembleHeartbeatEvents(onvifMetadata.IOFallback)
 
 		// We'll capture some more metrics, and send it to Hub, if not in offline mode ofcourse ;) ;)
 		if config.Offline == "true" {

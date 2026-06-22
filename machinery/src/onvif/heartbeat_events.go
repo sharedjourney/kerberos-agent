@@ -10,15 +10,16 @@ import (
 )
 
 // AssembleHeartbeatEvents builds the onvif_events_list JSON. Prefers
-// the shared event-stream cache; falls back to a device-API token
-// enumeration when the cache has not yet observed any tokens, so the
-// heartbeat always surfaces something the UI can list. Returns "[]"
-// rather than nil on failure.
-func AssembleHeartbeatEvents(device *onvifsdk.Device) []byte {
+// the live event-stream cache; when it has not yet observed any tokens
+// it uses the supplied fallback (the digital-I/O token list gathered
+// out-of-band by the metadata poller) so the heartbeat still surfaces
+// something the UI can list. This path is intentionally non-blocking:
+// it never talks to the camera, so it cannot delay a heartbeat. Returns
+// "[]" rather than nil when nothing is available.
+func AssembleHeartbeatEvents(fallback []ONVIFEvents) []byte {
 	events := SharedEventCache().Snapshot()
 	if len(events) == 0 {
-		log.Log.Debug("onvif.AssembleHeartbeatEvents(): cache empty, falling back to device enumeration")
-		events = enumerateIOTokens(device)
+		events = fallback
 	}
 	if len(events) == 0 {
 		return []byte("[]")

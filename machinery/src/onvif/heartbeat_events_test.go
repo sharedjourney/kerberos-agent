@@ -36,14 +36,35 @@ func TestAssembleHeartbeatEvents_CachePopulated_UsesCache(t *testing.T) {
 	}
 }
 
-func TestAssembleHeartbeatEvents_CacheEmptyDeviceNil_ReturnsEmptyArray(t *testing.T) {
+func TestAssembleHeartbeatEvents_CacheEmptyNoFallback_ReturnsEmptyArray(t *testing.T) {
 	resetCache(t)
 
 	got := AssembleHeartbeatEvents(nil)
 	assert.Equal(t, "[]", string(got))
 }
 
-func TestAssembleHeartbeatEvents_CachePopulated_IgnoresDevice(t *testing.T) {
+// When the live cache has not yet observed any tokens (e.g. a motion-
+// only camera that never emits digital I/O), the heartbeat falls back
+// to the token list gathered out-of-band by the metadata poller. This
+// list must be passed in — AssembleHeartbeatEvents must NOT do its own
+// blocking device enumeration on the send path.
+func TestAssembleHeartbeatEvents_CacheEmpty_UsesFallback(t *testing.T) {
+	resetCache(t)
+	fallback := []ONVIFEvents{
+		{Key: "DI1", Type: "input", Value: "false"},
+		{Key: "DO1", Type: "output", Value: "false"},
+	}
+
+	got := AssembleHeartbeatEvents(fallback)
+
+	var events []ONVIFEvents
+	if assert.NoError(t, json.Unmarshal(got, &events)) {
+		assert.Equal(t, fallback, events)
+	}
+}
+
+// Live cache state always wins over the fallback token list.
+func TestAssembleHeartbeatEvents_LiveCachePreferredOverFallback(t *testing.T) {
 	resetCache(t)
 	SharedEventCache().Apply(stream.Event{
 		Kind:      stream.KindDigitalInput,
@@ -51,7 +72,16 @@ func TestAssembleHeartbeatEvents_CachePopulated_IgnoresDevice(t *testing.T) {
 		State:     stream.StateActive,
 		Source:    map[string]string{"InputToken": "DI1"},
 	})
-	assert.NotPanics(t, func() { AssembleHeartbeatEvents(nil) })
+	fallback := []ONVIFEvents{{Key: "STALE", Type: "input", Value: "false"}}
+
+	got := AssembleHeartbeatEvents(fallback)
+
+	var events []ONVIFEvents
+	if assert.NoError(t, json.Unmarshal(got, &events)) {
+		if assert.Len(t, events, 1) {
+			assert.Equal(t, "DI1-input", events[0].Key, "live cache must win over fallback")
+		}
+	}
 }
 
 // --- MergeCacheTokensForHTTP ----------------------------------------
