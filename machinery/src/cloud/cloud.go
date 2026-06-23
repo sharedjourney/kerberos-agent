@@ -234,10 +234,22 @@ const (
 // cadence so HandleHeartBeat never performs blocking camera I/O on the
 // send path. It primes the cache once immediately, then ticks until
 // stopped. The blocking work is bounded by the ONVIF client timeout.
-func pollONVIFMetadata(configuration *models.Configuration, stop <-chan struct{}) {
+func pollONVIFMetadata(configuration *models.Configuration, stop <-chan struct{}, cache *onvif.MetadataCache) {
 	refresh := func() {
-		camera := configuration.Config.Capture.IPCamera
-		onvif.SharedMetadataCache().Store(onvif.GatherHeartbeatMetadata(&camera))
+		// Read only the ONVIF connection fields rather than copying the
+		// whole IPCamera value: RunAgent writes other IPCamera fields
+		// (Width/Height/BaseHeight) on each (re)start from a different
+		// goroutine, so a whole-struct copy here would be an
+		// unsynchronised read. These three are never written after config
+		// load. Re-reading the live config each tick is what lets a
+		// removed camera fall back to defaults on the next poll.
+		src := configuration.Config.Capture.IPCamera
+		camera := models.IPCamera{
+			ONVIFXAddr:    src.ONVIFXAddr,
+			ONVIFUsername: src.ONVIFUsername,
+			ONVIFPassword: src.ONVIFPassword,
+		}
+		cache.Store(onvif.GatherHeartbeatMetadata(&camera))
 	}
 	refresh()
 
@@ -267,11 +279,20 @@ func HandleHeartBeat(configuration *models.Configuration, communication *models.
 	}
 
 	// Refresh ONVIF metadata off the heartbeat send path so a wedged
-	// camera can never stall the heartbeat. Stops when this function
-	// returns (reconfiguration / shutdown).
+	// camera can never stall the heartbeat. The cache is local: this
+	// function is its only writer (via the poller) and reader (below).
+	// Stops when this function returns (reconfiguration / shutdown).
+	// Two caches with deliberately different scopes: metadataCache has a
+	// single owner (the poller below writes it, this loop reads it, both
+	// live here) so it is a local; eventCache is shared across goroutines
+	// (event-stream writer, this reader, the HTTP I/O endpoints) so it is
+	// created once at bootstrap and carried on Communication. Do not move
+	// metadataCache onto Communication — the locality is intentional.
+	metadataCache := onvif.NewMetadataCache()
+	eventCache := onvif.EventCacheFor(communication)
 	stopMetadata := make(chan struct{})
 	defer close(stopMetadata)
-	go pollONVIFMetadata(configuration, stopMetadata)
+	go pollONVIFMetadata(configuration, stopMetadata, metadataCache)
 
 	kerberosAgentVersion := utils.VERSION
 
@@ -286,13 +307,13 @@ loop:
 		// can never delay a heartbeat. Live digital-I/O state still comes
 		// from the event-stream cache, with the poller's enumerated token
 		// list as a non-blocking fallback.
-		onvifMetadata := onvif.SharedMetadataCache().Snapshot()
+		onvifMetadata := metadataCache.Snapshot()
 		onvifEnabled := onvifMetadata.Enabled
 		onvifZoom := onvifMetadata.Zoom
 		onvifPanTilt := onvifMetadata.PanTilt
 		onvifPresets := onvifMetadata.Presets
 		onvifPresetsList := onvifMetadata.PresetsList
-		onvifEventsList := onvif.AssembleHeartbeatEvents(onvifMetadata.IOFallback)
+		onvifEventsList := onvif.AssembleHeartbeatEvents(eventCache, onvifMetadata.IOFallback)
 
 		// We'll capture some more metrics, and send it to Hub, if not in offline mode ofcourse ;) ;)
 		if config.Offline == "true" {

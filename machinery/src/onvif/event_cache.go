@@ -2,11 +2,9 @@ package onvif
 
 import (
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/kerberos-io/agent/machinery/src/log"
 	"github.com/kerberos-io/onvif/event/stream"
 )
 
@@ -21,24 +19,15 @@ type ONVIFEvents struct {
 	Timestamp int64
 }
 
-// GetInputOutputs returns the most recent digital input/output state
-// from the shared event cache.
-func GetInputOutputs() ([]ONVIFEvents, error) {
-	events := SharedEventCache().Snapshot()
-	for _, value := range events {
-		log.Log.Debug("onvif.GetInputOutputs(): " + value.Key + " - " + value.Value + " (" + strconv.FormatInt(value.Timestamp, 10) + ")")
-	}
-	return events, nil
-}
-
 // EventCache holds the most recent digital input/output state per
 // token. The heartbeat snapshots this instead of opening a parallel
 // pull-point subscription, so the agent holds a single ONVIF
 // subscription per camera.
 //
-// Singleton today (one configured camera per agent). Per-camera
-// caching would require keying by DeviceID and threading the cache
-// through models.Communication.
+// One instance per agent is created at bootstrap and carried on
+// models.Communication (see EventCacheFor); the event-stream goroutine
+// writes it, the heartbeat and HTTP I/O endpoints read it. Per-camera
+// caching would key the items by DeviceID.
 type EventCache struct {
 	mu    sync.RWMutex
 	items map[string]ONVIFEvents
@@ -46,10 +35,6 @@ type EventCache struct {
 	// active heuristic at its boundary.
 	nowFn func() int64
 }
-
-var sharedEventCache = NewEventCache()
-
-func SharedEventCache() *EventCache { return sharedEventCache }
 
 func NewEventCache() *EventCache {
 	return &EventCache{
@@ -71,6 +56,9 @@ func NewEventCache() *EventCache {
 //     as Changed would let malformed notifications poison the
 //     heuristic.
 func (c *EventCache) Apply(ev stream.Event) {
+	if c == nil {
+		return
+	}
 	suffix := cacheKindSuffix(ev.Kind)
 	if suffix == "" {
 		return
@@ -114,6 +102,9 @@ func (c *EventCache) Apply(ev stream.Event) {
 // input is actually high; absence of recent events is the real signal
 // for inactive.
 func (c *EventCache) Snapshot() []ONVIFEvents {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -136,6 +127,9 @@ func (c *EventCache) Snapshot() []ONVIFEvents {
 // heartbeat cannot publish tokens cached from a previous run or a
 // different camera.
 func (c *EventCache) Reset() {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.items = make(map[string]ONVIFEvents)

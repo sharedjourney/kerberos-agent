@@ -376,7 +376,7 @@ func GoToOnvifPreset(c *gin.Context) {
 // @Summary Will get the digital inputs from the ONVIF device.
 // @Description Will get the digital inputs from the ONVIF device.
 // @Success 200 {object} models.APIResponse
-func DoGetDigitalInputs(c *gin.Context) {
+func DoGetDigitalInputs(c *gin.Context, communication *models.Communication) {
 	var onvifCredentials models.OnvifCredentials
 	err := c.BindJSON(&onvifCredentials)
 
@@ -407,7 +407,7 @@ func DoGetDigitalInputs(c *gin.Context) {
 			for _, input := range onvifInputs.DigitalInputs {
 				tokens = append(tokens, string(input.Token))
 			}
-			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP("input", tokens)})
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP(onvif.EventCacheFor(communication), "input", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
@@ -432,7 +432,7 @@ func DoGetDigitalInputs(c *gin.Context) {
 // @Summary Will get the relay outputs from the ONVIF device.
 // @Description Will get the relay outputs from the ONVIF device.
 // @Success 200 {object} models.APIResponse
-func DoGetRelayOutputs(c *gin.Context) {
+func DoGetRelayOutputs(c *gin.Context, communication *models.Communication) {
 	var onvifCredentials models.OnvifCredentials
 	err := c.BindJSON(&onvifCredentials)
 
@@ -463,7 +463,7 @@ func DoGetRelayOutputs(c *gin.Context) {
 			for _, output := range onvifOutputs.RelayOutputs {
 				tokens = append(tokens, string(output.Token))
 			}
-			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP("output", tokens)})
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP(onvif.EventCacheFor(communication), "output", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),

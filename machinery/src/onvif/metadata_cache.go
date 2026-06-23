@@ -59,22 +59,23 @@ func DefaultMetadata() DeviceMetadata {
 // without ever touching the camera, so a slow ONVIF call can no longer
 // delay a heartbeat.
 //
-// Singleton today (one configured camera per agent), matching
-// EventCache.
+// One instance is created locally in cloud.HandleHeartBeat (its only
+// reader and writer both live there), so it needs no global. The poller
+// re-reads the live config every tick, so removing the ONVIF camera
+// stores DefaultMetadata again on the next tick.
 type MetadataCache struct {
 	mu   sync.RWMutex
 	data DeviceMetadata
 }
-
-var sharedMetadataCache = NewMetadataCache()
-
-func SharedMetadataCache() *MetadataCache { return sharedMetadataCache }
 
 func NewMetadataCache() *MetadataCache {
 	return &MetadataCache{data: DefaultMetadata()}
 }
 
 func (c *MetadataCache) Store(md DeviceMetadata) {
+	if c == nil {
+		return
+	}
 	if md.PresetsList == nil {
 		md.PresetsList = []byte("[]")
 	}
@@ -84,13 +85,31 @@ func (c *MetadataCache) Store(md DeviceMetadata) {
 }
 
 func (c *MetadataCache) Snapshot() DeviceMetadata {
+	if c == nil {
+		return DefaultMetadata()
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.data
+	md := c.data
+	// Defensive copies of the reference-typed fields: the snapshot shares
+	// backing arrays with the poller-owned value, so a caller that ever
+	// mutates a snapshot would otherwise race the poller. Store replaces
+	// the whole value wholesale today, but this keeps the read contract
+	// safe regardless of caller behaviour.
+	if md.PresetsList != nil {
+		md.PresetsList = append([]byte(nil), md.PresetsList...)
+	}
+	if md.IOFallback != nil {
+		md.IOFallback = append([]ONVIFEvents(nil), md.IOFallback...)
+	}
+	return md
 }
 
-// Reset returns the cache to defaults (used on shutdown and in tests).
+// Reset returns the cache to defaults (used in tests).
 func (c *MetadataCache) Reset() {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.data = DefaultMetadata()

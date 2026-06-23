@@ -16,8 +16,8 @@ import (
 // something the UI can list. This path is intentionally non-blocking:
 // it never talks to the camera, so it cannot delay a heartbeat. Returns
 // "[]" rather than nil when nothing is available.
-func AssembleHeartbeatEvents(fallback []ONVIFEvents) []byte {
-	events := SharedEventCache().Snapshot()
+func AssembleHeartbeatEvents(cache *EventCache, fallback []ONVIFEvents) []byte {
+	events := cache.Snapshot()
 	if len(events) == 0 {
 		events = fallback
 	}
@@ -42,9 +42,9 @@ func AssembleHeartbeatEvents(fallback []ONVIFEvents) []byte {
 // can appear for the same physical I/O. In the 1:1 agent-camera
 // deployment model the cached entry carries the live state callers
 // actually care about; the bare-token entry is harmless context.
-func MergeCacheTokensForHTTP(eventType string, deviceTokens []string) []ONVIFEvents {
+func MergeCacheTokensForHTTP(cache *EventCache, eventType string, deviceTokens []string) []ONVIFEvents {
 	var out []ONVIFEvents
-	for _, e := range SharedEventCache().Snapshot() {
+	for _, e := range cache.Snapshot() {
 		if e.Type == eventType {
 			out = append(out, e)
 		}

@@ -103,8 +103,8 @@ func AddRoutes(r *gin.Engine, authMiddleware *jwt.GinJWTMiddleware, configDirect
 			api.POST("/camera/onvif/gotopreset", GoToOnvifPreset)
 			api.POST("/camera/onvif/pantilt", DoOnvifPanTilt)
 			api.POST("/camera/onvif/zoom", DoOnvifZoom)
-			api.POST("/camera/onvif/inputs", DoGetDigitalInputs)
-			api.POST("/camera/onvif/outputs", DoGetRelayOutputs)
+			api.POST("/camera/onvif/inputs", func(c *gin.Context) { DoGetDigitalInputs(c, communication) })
+			api.POST("/camera/onvif/outputs", func(c *gin.Context) { DoGetRelayOutputs(c, communication) })
 			api.POST("/camera/onvif/outputs/:output", DoTriggerRelayOutput)
 			api.POST("/camera/verify/:streamType", capture.VerifyCamera)
 		}
