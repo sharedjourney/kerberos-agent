@@ -12,6 +12,7 @@ jobs:
       - run: apt-get update && apt-get install -y --no-install-recommends libavcodec-dev libavformat-dev libswscale-dev libjpeg62-turbo-dev
       - run: cd machinery && go mod download
       - run: cd machinery && go test -v ./...
+      - run: cd machinery && go test -race ./src/onvif/... ./src/cloud/...
       - run: cd machinery && go vet
 
   ui:
