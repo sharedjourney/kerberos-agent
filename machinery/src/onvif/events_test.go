@@ -137,6 +137,27 @@ func TestDispatchEvent_CtxCancelledAndHandleMotionClosed_DoesNotPanic(t *testing
 	})
 }
 
+func TestDispatchEvent_ChannelClosedWhileCtxAlive_DoesNotPanic(t *testing.T) {
+	// The genuine shutdown race the ctx pre-check does NOT cover: another
+	// goroutine closes HandleMotion while ctx is still alive (or ctx is
+	// cancelled concurrently so the select sees both the closed-channel
+	// send and ctx.Done() as ready and picks randomly). A send on a
+	// closed channel is a *ready* case, so the default arm cannot save
+	// us. Loop to defeat select's randomisation.
+	cfg := makeConfig("true", "true", "cam-1")
+	ev := stream.Event{Kind: stream.KindMotion, State: stream.StateActive}
+
+	assert.NotPanics(t, func() {
+		for i := 0; i < 200; i++ {
+			comm := &models.Communication{HandleMotion: make(chan models.MotionDataPartial, 1)}
+			close(comm.HandleMotion)
+			ctx, cancel := context.WithCancel(context.Background())
+			dispatchEvent(ctx, ev, cfg, comm)
+			cancel()
+		}
+	})
+}
+
 // --- handleStreamEvent -----------------------------------------------
 
 func TestHandleStreamEvent_AppliesToCache(t *testing.T) {

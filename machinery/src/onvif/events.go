@@ -164,6 +164,12 @@ func dispatchEvent(ctx context.Context, ev stream.Event, configuration *models.C
 		Timestamp:       time.Now().Unix(),
 		NumberOfChanges: 0, // ONVIF does not quantify motion area.
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			// HandleMotion was closed by the shutdown path mid-dispatch.
+			log.Log.Debug("onvif.dispatchEvent(): HandleMotion closed during shutdown, dropping ONVIF motion event")
+		}
+	}()
 	select {
 	case <-ctx.Done():
 	case communication.HandleMotion <- dataToPass:
