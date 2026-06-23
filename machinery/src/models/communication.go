@@ -73,9 +73,15 @@ type Communication struct {
 	RecordingManualHeartbeatSeen *abool.AtomicBool
 	Queue                        *packets.Queue
 	SubQueue                     *packets.Queue
-	Image                        string
-	CameraConnected              bool
-	MainStreamConnected          bool
-	SubStreamConnected           bool
-	HasBackChannel               bool
+	// ONVIFEventCache holds the shared *onvif.EventCache for this agent.
+	// Typed as any to avoid a models->onvif import cycle (onvif imports
+	// models). Created once at bootstrap; use onvif.EventCacheFor to read
+	// it back type-safely. Shared by the event-stream goroutine (writer),
+	// the heartbeat (reader), and the HTTP digital-I/O endpoints (reader).
+	ONVIFEventCache     any
+	Image               string
+	CameraConnected     bool
+	MainStreamConnected bool
+	SubStreamConnected  bool
+	HasBackChannel      bool
 }

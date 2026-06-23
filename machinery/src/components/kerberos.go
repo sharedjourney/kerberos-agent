@@ -80,6 +80,12 @@ func Bootstrap(ctx context.Context, configDirectory string, configuration *model
 	communication.RecordingManualStart = &atomic.Int64{}
 	communication.RecordingManualHeartbeatSeen = abool.New()
 
+	// One shared ONVIF event cache for the whole agent lifetime: the
+	// per-generation event-stream goroutine writes it, the heartbeat and
+	// the HTTP I/O endpoints read it. Created here (before HandleHeartBeat
+	// reads it) so all three see the same instance across reconfigurations.
+	communication.ONVIFEventCache = onvif.NewEventCache()
+
 	cameraSettings := &models.Camera{}
 
 	// Before starting the agent, we have a control goroutine, that might
@@ -343,7 +349,7 @@ func RunAgent(configDirectory string, configuration *models.Configuration, commu
 
 	// Feeds the shared event cache (used by the heartbeat) and routes
 	// motion events into HandleMotion when ONVIFMotion is enabled.
-	go onvif.HandleONVIFEventStream(*communication.Context, configuration, communication)
+	go onvif.HandleONVIFEventStream(*communication.Context, configuration, communication, onvif.EventCacheFor(communication))
 
 	communication.HandleAudio = make(chan models.AudioDataPartial, 10)
 	if rtspBackChannelClient.HasBackChannel {
