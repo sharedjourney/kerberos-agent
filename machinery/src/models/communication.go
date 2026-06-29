@@ -44,11 +44,17 @@ type Communication struct {
 	// HandleLiveHLS is the live HLS viewer keepalive. It carries the requested
 	// quality tier ("auto"|"high"|"low"; empty => auto) so the producer can switch
 	// the live session between the main and sub stream on demand.
-	HandleLiveHLS       chan string
-	HandleONVIF         chan OnvifAction
-	IsConfiguring       *abool.AtomicBool
-	Queue               *packets.Queue
-	SubQueue            *packets.Queue
+	HandleLiveHLS chan string
+	HandleONVIF   chan OnvifAction
+	IsConfiguring *abool.AtomicBool
+	Queue         *packets.Queue
+	SubQueue      *packets.Queue
+	// ONVIFEventCache holds the shared *onvif.EventCache for this agent.
+	// Typed as any to avoid a models->onvif import cycle (onvif imports
+	// models). Created once at bootstrap; use onvif.EventCacheFor to read
+	// it back type-safely. Shared by the event-stream goroutine (writer),
+	// the heartbeat (reader), and the HTTP digital-I/O endpoints (reader).
+	ONVIFEventCache     any
 	Image               string
 	CameraConnected     bool
 	MainStreamConnected bool

@@ -376,7 +376,7 @@ func GoToOnvifPreset(c *gin.Context) {
 // @Summary Will get the digital inputs from the ONVIF device.
 // @Description Will get the digital inputs from the ONVIF device.
 // @Success 200 {object} models.APIResponse
-func DoGetDigitalInputs(c *gin.Context) {
+func DoGetDigitalInputs(c *gin.Context, communication *models.Communication) {
 	var onvifCredentials models.OnvifCredentials
 	err := c.BindJSON(&onvifCredentials)
 
@@ -394,53 +394,20 @@ func DoGetDigitalInputs(c *gin.Context) {
 			},
 		}
 
+		// Single-camera-per-agent deployment model: the credential-
+		// supplied device is virtually always the agent's configured
+		// camera, so prefer the shared event cache (live Value/
+		// Timestamp) and merge bare device-API tokens for any token
+		// the stream has not yet observed.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
 		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
-
-		onvifInputs, _ := onvif.GetDigitalInputs(device)
 		if err == nil {
-			// Get the digital inputs and outputs from the device
-			inputOutputs, err := onvif.GetInputOutputs()
-			if err == nil {
-				if err == nil {
-					// Get the digital outputs from the device
-					var inputs []onvif.ONVIFEvents
-					for _, event := range inputOutputs {
-						if event.Type == "input" {
-							inputs = append(inputs, event)
-						}
-					}
-					// Iterate over inputs from onvif and compare
-
-					for _, input := range onvifInputs.DigitalInputs {
-						find := false
-						for _, event := range inputs {
-							key := string(input.Token)
-							if key == event.Key {
-								find = true
-							}
-						}
-						if !find {
-							key := string(input.Token)
-							inputs = append(inputs, onvif.ONVIFEvents{
-								Key:  key,
-								Type: "input",
-							})
-						}
-					}
-					c.JSON(200, gin.H{
-						"data": inputs,
-					})
-				} else {
-					c.JSON(400, gin.H{
-						"data": "Something went wrong: " + err.Error(),
-					})
-				}
-			} else {
-				c.JSON(400, gin.H{
-					"data": "Something went wrong: " + err.Error(),
-				})
+			onvifInputs, _ := onvif.GetDigitalInputs(device)
+			var tokens []string
+			for _, input := range onvifInputs.DigitalInputs {
+				tokens = append(tokens, string(input.Token))
 			}
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP(onvif.EventCacheFor(communication), "input", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
@@ -465,7 +432,7 @@ func DoGetDigitalInputs(c *gin.Context) {
 // @Summary Will get the relay outputs from the ONVIF device.
 // @Description Will get the relay outputs from the ONVIF device.
 // @Success 200 {object} models.APIResponse
-func DoGetRelayOutputs(c *gin.Context) {
+func DoGetRelayOutputs(c *gin.Context, communication *models.Communication) {
 	var onvifCredentials models.OnvifCredentials
 	err := c.BindJSON(&onvifCredentials)
 
@@ -483,33 +450,20 @@ func DoGetRelayOutputs(c *gin.Context) {
 			},
 		}
 
+		// Single-camera-per-agent deployment model: the credential-
+		// supplied device is virtually always the agent's configured
+		// camera, so prefer the shared event cache (live Value/
+		// Timestamp) and merge bare device-API tokens for any token
+		// the stream has not yet observed.
 		cameraConfiguration := configuration.Config.Capture.IPCamera
-		_, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
+		device, _, err := onvif.ConnectToOnvifDevice(&cameraConfiguration)
 		if err == nil {
-			// Get the digital inputs and outputs from the device
-			inputOutputs, err := onvif.GetInputOutputs()
-			if err == nil {
-				if err == nil {
-					// Get the digital outputs from the device
-					var outputs []onvif.ONVIFEvents
-					for _, event := range inputOutputs {
-						if event.Type == "output" {
-							outputs = append(outputs, event)
-						}
-					}
-					c.JSON(200, gin.H{
-						"data": outputs,
-					})
-				} else {
-					c.JSON(400, gin.H{
-						"data": "Something went wrong: " + err.Error(),
-					})
-				}
-			} else {
-				c.JSON(400, gin.H{
-					"data": "Something went wrong: " + err.Error(),
-				})
+			onvifOutputs, _ := onvif.GetRelayOutputs(device)
+			var tokens []string
+			for _, output := range onvifOutputs.RelayOutputs {
+				tokens = append(tokens, string(output.Token))
 			}
+			c.JSON(200, gin.H{"data": onvif.MergeCacheTokensForHTTP(onvif.EventCacheFor(communication), "output", tokens)})
 		} else {
 			c.JSON(400, gin.H{
 				"data": "Something went wrong: " + err.Error(),
