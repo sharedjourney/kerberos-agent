@@ -243,13 +243,20 @@ func HandleONVIFActions(configuration *models.Configuration, communication *mode
 }
 
 func ConnectToOnvifDevice(cameraConfiguration *models.IPCamera) (*onvif.Device, device.GetCapabilitiesResponse, error) {
+	return connectToOnvifDevice(cameraConfiguration, onvifHTTPClient())
+}
+
+// connectToOnvifDevice takes the HTTP client explicitly so the event
+// stream can supply one bounded above its long-poll instead of at
+// onvifCallTimeout.
+func connectToOnvifDevice(cameraConfiguration *models.IPCamera, client *http.Client) (*onvif.Device, device.GetCapabilitiesResponse, error) {
 	log.Debug("onvif.ConnectToOnvifDevice(): started")
 	dev, err := onvif.NewDevice(onvif.DeviceParams{
 		Xaddr:      cameraConfiguration.ONVIFXAddr,
 		Username:   cameraConfiguration.ONVIFUsername,
 		Password:   cameraConfiguration.ONVIFPassword,
 		AuthMode:   "both",
-		HttpClient: onvifHTTPClient(),
+		HttpClient: client,
 	})
 
 	var capabilities device.GetCapabilitiesResponse
@@ -260,7 +267,7 @@ func ConnectToOnvifDevice(cameraConfiguration *models.IPCamera) (*onvif.Device, 
 			Username:   cameraConfiguration.ONVIFUsername,
 			Password:   cameraConfiguration.ONVIFPassword,
 			AuthMode:   "digest",
-			HttpClient: onvifHTTPClient(),
+			HttpClient: client,
 		})
 		if err != nil {
 			log.Debug("onvif.ConnectToOnvifDevice(): " + err.Error())

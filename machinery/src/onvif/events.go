@@ -69,6 +69,19 @@ func HandleONVIFEventStream(ctx context.Context, configuration *models.Configura
 	}
 }
 
+// streamOptions builds the event-stream configuration. PullTimeout is
+// set explicitly: leaving it zero restores the stream package's 5s
+// default, which the HTTP client would then outrun.
+//
+// RawTopicFilter stays empty on purpose — server-side topic filtering
+// is fragile across vendors and AXIS requires no filter.
+func streamOptions(deviceID string) stream.Options {
+	return stream.Options{
+		DeviceID:    deviceID,
+		PullTimeout: onvifStreamPullTimeout,
+	}
+}
+
 // runStreamOnce returns (ran, retry). ran=true if at least one event
 // or error was observed before exit. retry=true on transient failure
 // (including channel-close while ctx is still alive — that means the
@@ -93,14 +106,14 @@ func runStreamOnce(ctx context.Context, configuration *models.Configuration, com
 	// window.
 	cache.Reset()
 
-	device, _, err := ConnectToOnvifDevice(&camera)
+	device, _, err := connectToOnvifDevice(&camera, onvifStreamHTTPClient())
 	if err != nil {
 		log.Error("onvif.HandleONVIFEventStream(): connect: " + err.Error())
 		return false, true
 	}
 
 	deviceID := resolveDeviceID(configuration.Name, camera.ONVIFXAddr)
-	s, err := stream.NewStream(ctx, device, stream.Options{DeviceID: deviceID})
+	s, err := stream.NewStream(ctx, device, streamOptions(deviceID))
 	if err != nil {
 		log.Error("onvif.HandleONVIFEventStream(): open stream: " + err.Error())
 		return false, true

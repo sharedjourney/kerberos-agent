@@ -10,18 +10,41 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// onvifCallTimeout bounds every ONVIF round-trip. The SDK defaults to a
-// timeout-less http.Client, so a camera that accepts the TCP connection
-// but never answers (common when it is busy servicing the event-stream
-// long-poll) would otherwise block the caller indefinitely. The
-// heartbeat used to make these calls inline on its send path, which is
-// how a slow camera stalled heartbeats while RTSP stayed healthy.
+// onvifCallTimeout bounds every short ONVIF round-trip. The SDK
+// defaults to a timeout-less http.Client, so a camera that accepts the
+// TCP connection but never answers (common when it is busy servicing
+// the event-stream long-poll) would otherwise block the caller
+// indefinitely. The heartbeat used to make these calls inline on its
+// send path, which is how a slow camera stalled heartbeats while RTSP
+// stayed healthy.
 const onvifCallTimeout = 5 * time.Second
 
+// The event stream is the one ONVIF caller that blocks deliberately:
+// PullMessages asks the camera to hold the connection open until an
+// event arrives or onvifStreamPullTimeout elapses. It must not inherit
+// onvifCallTimeout — http.Client.Timeout covers the whole exchange and
+// starts before the camera has parsed the request, so a ceiling at or
+// below the long-poll expires first and every quiet pull fails.
+//
+// onvifStreamPullTimeout stays well inside the stream's 60s
+// subscription termination and 10s renew margin, so renew scheduling is
+// unaffected. Events still arrive when they happen — the camera returns
+// as soon as it has one.
+const (
+	onvifStreamPullTimeout = 30 * time.Second
+	onvifStreamHTTPTimeout = 40 * time.Second
+)
+
 // onvifHTTPClient returns the bounded client handed to NewDevice so all
-// ONVIF SOAP calls share one ceiling.
+// short ONVIF SOAP calls share one ceiling.
 func onvifHTTPClient() *http.Client {
 	return &http.Client{Timeout: onvifCallTimeout}
+}
+
+// onvifStreamHTTPClient returns the client for the event-stream device,
+// bounded above the long-poll instead of at onvifCallTimeout.
+func onvifStreamHTTPClient() *http.Client {
+	return &http.Client{Timeout: onvifStreamHTTPTimeout}
 }
 
 // DeviceMetadata is the slow-changing ONVIF capability snapshot the
