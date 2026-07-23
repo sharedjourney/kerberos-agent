@@ -174,8 +174,8 @@ func dispatchEvent(ctx context.Context, ev stream.Event, configuration *models.C
 		return
 	}
 	topic := sanitiseTopic(ev.Topic)
-	if ev.Kind != stream.KindMotion {
-		log.Log.Debug("onvif.dispatchEvent(): non-motion event " + ev.Kind.String() + " topic=" + topic)
+	if !triggersRecording(ev.Kind) {
+		log.Log.Debug("onvif.dispatchEvent(): non-recording event " + ev.Kind.String() + " topic=" + topic)
 		return
 	}
 	if ev.State != stream.StateActive {
@@ -278,6 +278,16 @@ func EventCacheFor(communication *models.Communication) *EventCache {
 		return nil
 	}
 	return cache
+}
+
+// triggersRecording reports whether an event Kind should start a
+// recording. KindObjectDetected is included because AXIS Object
+// Analytics and the ONVIF LineDetector/FieldDetector rules are what
+// operators actually configure as their motion trigger; the classifier
+// keeps them semantically distinct from KindMotion, and deciding they
+// both mean "record" is this layer's call, not the classifier's.
+func triggersRecording(k stream.Kind) bool {
+	return k == stream.KindMotion || k == stream.KindObjectDetected
 }
 
 // isONVIFMotionEnabled reports whether ONVIF motion dispatch is on.

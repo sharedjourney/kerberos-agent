@@ -68,10 +68,60 @@ func TestDispatchEvent_MotionInactive_DoesNotSend(t *testing.T) {
 	}
 }
 
-func TestDispatchEvent_NonMotionKindIgnored(t *testing.T) {
+func TestDispatchEvent_NonRecordingKindsIgnored(t *testing.T) {
+	for _, kind := range []stream.Kind{
+		stream.KindDigitalInput,
+		stream.KindDigitalOutput,
+		stream.KindTampering,
+		stream.KindImageQuality,
+		stream.KindAudioAlarm,
+		stream.KindUnknown,
+	} {
+		t.Run(kind.String(), func(t *testing.T) {
+			cfg := makeConfig("true", "true", "cam-1")
+			comm := makeCommunication(1)
+			ev := stream.Event{Kind: kind, State: stream.StateActive}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dispatchEvent(ctx, ev, cfg, comm)
+
+			select {
+			case <-comm.HandleMotion:
+				t.Fatalf("%s must not reach HandleMotion", kind)
+			case <-time.After(100 * time.Millisecond):
+			}
+		})
+	}
+}
+
+// TestDispatchEvent_ObjectDetectedActive_SendsToHandleMotion — AXIS
+// Object Analytics classifies as KindObjectDetected, not KindMotion,
+// but operators configure it as their motion trigger. The classifier
+// keeps the semantic distinction; the recording decision lives here.
+func TestDispatchEvent_ObjectDetectedActive_SendsToHandleMotion(t *testing.T) {
 	cfg := makeConfig("true", "true", "cam-1")
 	comm := makeCommunication(1)
-	ev := stream.Event{Kind: stream.KindDigitalInput, State: stream.StateActive}
+	ev := stream.Event{Kind: stream.KindObjectDetected, State: stream.StateActive}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dispatchEvent(ctx, ev, cfg, comm)
+
+	select {
+	case m := <-comm.HandleMotion:
+		assert.NotZero(t, m.Timestamp)
+	case <-time.After(time.Second):
+		t.Fatal("expected object-detected event to drive recording")
+	}
+}
+
+// TestDispatchEvent_ObjectDetectedInactive_DoesNotSend — the object-gone
+// edge must not start a recording, same as motion-stop.
+func TestDispatchEvent_ObjectDetectedInactive_DoesNotSend(t *testing.T) {
+	cfg := makeConfig("true", "true", "cam-1")
+	comm := makeCommunication(1)
+	ev := stream.Event{Kind: stream.KindObjectDetected, State: stream.StateInactive}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -79,7 +129,25 @@ func TestDispatchEvent_NonMotionKindIgnored(t *testing.T) {
 
 	select {
 	case <-comm.HandleMotion:
-		t.Fatal("non-motion kinds must not reach HandleMotion")
+		t.Fatal("inactive object-detected must not reach HandleMotion")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestDispatchEvent_ObjectDetected_RespectsONVIFMotionFlag — the flag
+// gates the whole ONVIF-to-recording path, object events included.
+func TestDispatchEvent_ObjectDetected_RespectsONVIFMotionFlag(t *testing.T) {
+	cfg := makeConfig("true", "false", "cam-1")
+	comm := makeCommunication(1)
+	ev := stream.Event{Kind: stream.KindObjectDetected, State: stream.StateActive}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dispatchEvent(ctx, ev, cfg, comm)
+
+	select {
+	case <-comm.HandleMotion:
+		t.Fatal("ONVIFMotion=false must gate object-detected events too")
 	case <-time.After(100 * time.Millisecond):
 	}
 }
