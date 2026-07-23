@@ -1,6 +1,7 @@
 package onvif
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -296,4 +297,64 @@ func TestStateToLegacyValue(t *testing.T) {
 	assert.Equal(t, "true", stateToLegacyValue(stream.StateActive))
 	assert.Equal(t, "false", stateToLegacyValue(stream.StateInactive))
 	assert.Equal(t, "false", stateToLegacyValue(stream.StateUnknown))
+}
+
+// TestEventCache_Apply_BoundsEntryCount — the cache key is built from a
+// token the camera supplies, with no cardinality bound and eviction only
+// on reconnect. A camera emitting a fresh token per event grows the map
+// until the agent is OOM-killed, and Snapshot feeds the same strings
+// into the heartbeat, so the growth is also republished to the Hub. A
+// real device has single-digit I/O tokens.
+func TestEventCache_Apply_BoundsEntryCount(t *testing.T) {
+	c := NewEventCache()
+
+	for i := 0; i < maxEventCacheEntries*3; i++ {
+		c.Apply(stream.Event{
+			Kind:      stream.KindDigitalInput,
+			Operation: stream.PropertyChanged,
+			State:     stream.StateActive,
+			Source:    map[string]string{"InputToken": "tok-" + strconv.Itoa(i)},
+		})
+	}
+
+	assert.LessOrEqual(t, len(c.Snapshot()), maxEventCacheEntries,
+		"a camera must not be able to grow the cache without bound")
+}
+
+// TestEventCache_Apply_KnownTokensStillUpdateAtCap — dropping past the
+// cap must not stop the tokens already tracked from updating, or a
+// flood would freeze the real I/O state at its last value.
+func TestEventCache_Apply_KnownTokensStillUpdateAtCap(t *testing.T) {
+	c := NewEventCache()
+
+	first := stream.Event{
+		Kind:      stream.KindDigitalInput,
+		Operation: stream.PropertyChanged,
+		State:     stream.StateInactive,
+		Source:    map[string]string{"InputToken": "real-input"},
+	}
+	c.Apply(first)
+
+	for i := 0; i < maxEventCacheEntries*2; i++ {
+		c.Apply(stream.Event{
+			Kind:      stream.KindDigitalInput,
+			Operation: stream.PropertyChanged,
+			State:     stream.StateActive,
+			Source:    map[string]string{"InputToken": "flood-" + strconv.Itoa(i)},
+		})
+	}
+
+	active := first
+	active.State = stream.StateActive
+	c.Apply(active)
+
+	var found bool
+	for _, e := range c.Snapshot() {
+		if e.Key == "real-input-input" {
+			found = true
+			assert.Equal(t, stateToLegacyValue(stream.StateActive), e.Value,
+				"an already-tracked token must still update once the cache is full")
+		}
+	}
+	assert.True(t, found, "the pre-existing token must survive the flood")
 }

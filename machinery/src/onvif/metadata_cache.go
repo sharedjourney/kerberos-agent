@@ -19,17 +19,10 @@ import (
 // stayed healthy.
 const onvifCallTimeout = 5 * time.Second
 
-// The event stream is the one ONVIF caller that blocks deliberately:
-// PullMessages asks the camera to hold the connection open until an
-// event arrives or onvifStreamPullTimeout elapses. It must not inherit
-// onvifCallTimeout — http.Client.Timeout covers the whole exchange and
-// starts before the camera has parsed the request, so a ceiling at or
-// below the long-poll expires first and every quiet pull fails.
-//
-// onvifStreamPullTimeout stays well inside the stream's 60s
-// subscription termination and 10s renew margin, so renew scheduling is
-// unaffected. Events still arrive when they happen — the camera returns
-// as soon as it has one.
+// The event stream blocks deliberately, so it must not inherit
+// onvifCallTimeout: the HTTP ceiling has to outlast the long-poll, an
+// invariant stream.NewStream enforces. Both stay inside the stream's
+// 60s subscription termination and 10s renew margin.
 const (
 	onvifStreamPullTimeout = 30 * time.Second
 	onvifStreamHTTPTimeout = 40 * time.Second
