@@ -293,12 +293,11 @@ func EventCacheFor(communication *models.Communication) *EventCache {
 	return cache
 }
 
-// triggersRecording reports whether an event Kind should start a
-// recording. KindObjectDetected is included because AXIS Object
-// Analytics and the ONVIF LineDetector/FieldDetector rules are what
-// operators actually configure as their motion trigger; the classifier
-// keeps them semantically distinct from KindMotion, and deciding they
-// both mean "record" is this layer's call, not the classifier's.
+// triggersRecording reports whether an event Kind starts a recording.
+// KindObjectDetected is included for AXIS Object Analytics, which
+// operators configure as their trigger. Note LineDetector/Crossed also
+// classifies as KindObjectDetected but never reaches here: it is
+// edge-triggered, so decode leaves State as StateUnknown.
 func triggersRecording(k stream.Kind) bool {
 	return k == stream.KindMotion || k == stream.KindObjectDetected
 }

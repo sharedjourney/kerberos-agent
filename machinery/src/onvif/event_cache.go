@@ -19,6 +19,10 @@ type ONVIFEvents struct {
 	Timestamp int64
 }
 
+// maxEventCacheEntries bounds the cache against a camera-controlled
+// key. A real device exposes single-digit I/O tokens.
+const maxEventCacheEntries = 64
+
 // EventCache holds the most recent digital input/output state per
 // token. The heartbeat snapshots this instead of opening a parallel
 // pull-point subscription, so the agent holds a single ONVIF
@@ -71,6 +75,15 @@ func (c *EventCache) Apply(ev stream.Event) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// The key is camera-supplied and the cache is cleared only on
+	// reconnect, so a device inventing a token per event would grow it
+	// until the agent is OOM-killed — and Snapshot republishes the same
+	// strings to the Hub in the heartbeat. Keys already tracked keep
+	// updating, so a flood cannot freeze the real I/O state.
+	if _, known := c.items[key]; !known && len(c.items) >= maxEventCacheEntries {
+		return
+	}
 
 	switch ev.Operation {
 	case stream.PropertyDeleted:
