@@ -248,6 +248,26 @@ func TestDispatchEvent_CtxCancelledAndHandleMotionClosed_DoesNotPanic(t *testing
 	})
 }
 
+func TestDispatchEvent_ChannelClosedWhileCtxAlive_DoesNotPanic(t *testing.T) {
+	// The shutdown race the ctx pre-check does NOT cover: the run closes
+	// its motion channel while ctx is still alive. A send on a closed
+	// channel is a *ready* select case, so only TrySendMotion's
+	// closed-channel guard keeps this from panicking. Loop to defeat
+	// select's randomisation.
+	cfg := makeConfig("true", "true", "cam-1")
+	ev := stream.Event{Kind: stream.KindMotion, State: stream.StateActive}
+
+	assert.NotPanics(t, func() {
+		for i := 0; i < 200; i++ {
+			comm := makeCommunication(t)
+			comm.CurrentRun().Shutdown(context.Background(), errors.New("test shutdown"))
+			ctx, cancel := context.WithCancel(context.Background())
+			dispatchEvent(ctx, ev, cfg, comm)
+			cancel()
+		}
+	})
+}
+
 // --- handleStreamEvent -----------------------------------------------
 
 func TestHandleStreamEvent_AppliesToCache(t *testing.T) {
