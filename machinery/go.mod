@@ -144,3 +144,5 @@ require (
 	howett.net/plist v0.0.0-20181124034731-591f970eefbb // indirect
 	moq.dev/moq-ffi v0.4.27 // indirect
 )
+
+replace github.com/kerberos-io/onvif => github.com/sharedjourney/kerberos-onvif v0.0.0-20261125100648-e4e554ddf7df

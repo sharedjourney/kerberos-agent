@@ -15,6 +15,9 @@ ENV GOROOT=/usr/local/go
 ENV GOPATH=/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:/usr/local/lib:$PATH
 ENV GOSUMDB=off
+# The onvif dependency is replaced with a fork (see machinery/go.mod).
+# GOPRIVATE fetches it directly instead of through the public proxy.
+ENV GOPRIVATE=github.com/sharedjourney/*
 
 ##########################################
 # Installing some additional dependencies.

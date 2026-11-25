@@ -789,8 +789,6 @@ github.com/kellydunn/golang-geo v0.7.0 h1:A5j0/BvNgGwY6Yb6inXQxzYwlPHc6WVZR+Mrar
 github.com/kellydunn/golang-geo v0.7.0/go.mod h1:YYlQPJ+DPEzrHx8kT3oPHC/NjyvCCXE+IuKGKdrjrcU=
 github.com/kerberos-io/joy4 v1.0.64 h1:gTUSotHSOhp9mNqEecgq88tQHvpj7TjmrvPUsPm0idg=
 github.com/kerberos-io/joy4 v1.0.64/go.mod h1:nZp4AjvKvTOXRrmDyAIOw+Da+JA5OcSo/JundGfOlFU=
-github.com/kerberos-io/onvif v1.2.3 h1:RDnDvLBd92VCgFOrlbGavzCVN9lQA/qs9novdNFIAOU=
-github.com/kerberos-io/onvif v1.2.3/go.mod h1:XSgEQXmEDjUQTbdXvsaRJt6Az8YPGj7L+j5iXKEGijU=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/asmfmt v1.3.2/go.mod h1:AG8TuvYojzulgDAMCnYn50l/5QV3Bs/tp6j0HLHbNSE=
@@ -933,6 +931,8 @@ github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0t
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58/go.mod h1:6lfFZQK844Gfx8o5WFuvpxWRwnSoipWe/p622j1v06w=
 github.com/ruudk/golang-pdf417 v0.0.0-20201230142125-a7e3863a1245/go.mod h1:pQAZKsJ8yyVxGRWYNEm9oFB8ieLgKFnamEyDmSA0BRk=
+github.com/sharedjourney/kerberos-onvif v0.0.0-20261125100648-e4e554ddf7df h1:f/5ZlwEe/rKsCNgiuG4zjAMsjIGEf+wjbOhW40hoVAA=
+github.com/sharedjourney/kerberos-onvif v0.0.0-20261125100648-e4e554ddf7df/go.mod h1:XSgEQXmEDjUQTbdXvsaRJt6Az8YPGj7L+j5iXKEGijU=
 github.com/sirupsen/logrus v1.5.0/go.mod h1:+F7Ogzej0PZc/94MaYx/nvG9jOFMD2osvC3s+Squfpo=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
